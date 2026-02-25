@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { fetchTrainData } from './services/api';
 import TrainTimeline from './TrainTimeline';
 
@@ -7,37 +7,17 @@ import './App.css';
 import './index.css';
 
 function App() {
-  const [data, setData] = useState({ toKarlskrona: [], toLessebo: [] });
+  const [data, setData] = useState({ toKarlskrona: [], toLessebo: [], history: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(new Date());
-  const [activeTab, setActiveTab] = useState('outbound'); // 'outbound' or 'inbound'
+  const [activeTab, setActiveTab] = useState('outbound'); 
   const notifiedIds = useRef(new Set());
-
-  const sendNotification = (title, body) => {
-    if (Notification.permission === 'granted') {
-      new Notification(title, { body, icon: '/vite.svg' });
-    }
-  };
-
-  const checkNotifications = useCallback((allData) => {
-    const allJourneys = [...allData.toKarlskrona, ...allData.toLessebo];
-    allJourneys.forEach(j => {
-      const isCritical = j.connectionRisk || j.leg1.stops.some(s => s.canceled) || (j.leg1.stops[j.leg1.stops.length-1]?.delay > 10);
-      if (isCritical && !notifiedIds.current.has(j.id)) {
-        const title = j.connectionRisk ? "⚠️ Anslutningsrisk!" : "❌ Tågstörning!";
-        const body = j.connectionRisk ? j.connectionWarning : `Tåg ${j.id} är försenat eller inställt.`;
-        sendNotification(title, body);
-        notifiedIds.current.add(j.id);
-      }
-    });
-  }, []);
 
   const fetchTrains = useCallback(async () => {
     try {
       const result = await fetchTrainData();
       setData(result);
-      checkNotifications(result);
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
@@ -46,18 +26,52 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [checkNotifications]);
+  }, []);
 
   useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
     fetchTrains();
     const intervalId = setInterval(fetchTrains, 30000);
     return () => clearInterval(intervalId);
   }, [fetchTrains]);
 
-  const currentJourneys = activeTab === 'outbound' ? data.toKarlskrona : data.toLessebo;
+  const renderHistoryTable = () => (
+    <div className="history-container">
+      <div className="table-wrapper">
+        <table className="history-table">
+          <thead>
+            <tr>
+              <th>Datum</th>
+              <th>Rutt</th>
+              <th>Tabelltid</th>
+              <th>Verklig tid</th>
+              <th>Diff</th>
+              <th>Anledning</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.history.map((j) => {
+              const depTime = parseISO(j.departureTime);
+              const leg1LastStop = j.leg1.stops[j.leg1.stops.length - 1];
+              const totalDelay = leg1LastStop.delay;
+              
+              return (
+                <tr key={j.id} className={totalDelay > 5 ? 'row-delayed' : ''}>
+                  <td>{format(depTime, 'dd MMM')}</td>
+                  <td>{j.fromName} → {j.toName}</td>
+                  <td>{format(depTime, 'HH:mm')}</td>
+                  <td className={totalDelay > 0 ? 'late' : ''}>
+                    {format(parseISO(j.leg1.stops[0].actual_time), 'HH:mm')}
+                  </td>
+                  <td>{totalDelay > 0 ? `+${totalDelay} min` : 'I tid'}</td>
+                  <td className="reason-cell" title={j.reason}>{j.reason || '-'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   return (
     <div className="container">
@@ -70,29 +84,22 @@ function App() {
       </header>
 
       <div className="tabs">
-        <button 
-          className={activeTab === 'outbound' ? 'active' : ''} 
-          onClick={() => setActiveTab('outbound')}
-        >
-          Till Karlskrona
-        </button>
-        <button 
-          className={activeTab === 'inbound' ? 'active' : ''} 
-          onClick={() => setActiveTab('inbound')}
-        >
-          Hem till Lessebo
-        </button>
+        <button className={activeTab === 'outbound' ? 'active' : ''} onClick={() => setActiveTab('outbound')}>Jobb</button>
+        <button className={activeTab === 'inbound' ? 'active' : ''} onClick={() => setActiveTab('inbound')}>Hem</button>
+        <button className={activeTab === 'history' ? 'active' : ''} onClick={() => setActiveTab('history')}>Historik</button>
       </div>
 
       {error && <div className="error-message">{error}</div>}
 
-      <div className="journeys-list">
-        {currentJourneys.length === 0 && !loading ? (
-          <div className="no-data">Inga kommande resor hittades.</div>
+      <div className="content-area">
+        {activeTab === 'history' ? (
+          renderHistoryTable()
         ) : (
-          currentJourneys.map((journey) => (
-            <TrainTimeline key={journey.id} journey={journey} />
-          ))
+          <div className="journeys-list">
+            {(activeTab === 'outbound' ? data.toKarlskrona : data.toLessebo).map((journey) => (
+              <TrainTimeline key={journey.id} journey={journey} />
+            ))}
+          </div>
         )}
       </div>
     </div>

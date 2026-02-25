@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { format, parseISO } from 'date-fns';
-import { TrainFront, Clock, AlertTriangle, ChevronDown, CheckCircle, ArrowRight } from 'lucide-react'; 
+import { TrainFront, Clock, AlertTriangle, ChevronDown, CheckCircle, ArrowRight, Calendar } from 'lucide-react'; 
 import './TrainTimeline.css';
 
 const TrainTimeline = ({ journey }) => {
     const [isOpen, setIsOpen] = useState(false);
 
-    const { leg1, leg2, connectionRisk, connectionWarning } = journey;
+    const { leg1, leg2, connectionRisk, connectionWarning, reason, date } = journey;
     
     const lastStopLeg1 = leg1.stops[leg1.stops.length - 1];
     const delayLeg1 = lastStopLeg1 ? lastStopLeg1.delay : 0;
@@ -25,6 +25,9 @@ const TrainTimeline = ({ journey }) => {
         <div className={`journey-card status-${statusClass} ${isOpen ? 'expanded' : ''}`}>
             <div className="journey-header" onClick={() => setIsOpen(!isOpen)}>
                 <div className="journey-main-info">
+                    <div className="journey-date">
+                        <Calendar size={12} /> {format(parseISO(journey.departureTime), 'dd MMM')}
+                    </div>
                     <div className="journey-time-row">
                         <span className="time big">
                             {format(parseISO(depFromStart.advertised_time), 'HH:mm')}
@@ -35,7 +38,7 @@ const TrainTimeline = ({ journey }) => {
                         </span>
                     </div>
                     <div className="journey-route-label">
-                        {depFromStart.station_name} &rarr; {arrAtEnd.station_name}
+                        {journey.fromName} &rarr; {journey.toName}
                     </div>
                 </div>
 
@@ -47,6 +50,12 @@ const TrainTimeline = ({ journey }) => {
                     <ChevronDown size={20} className={`chevron ${isOpen ? 'rotated' : ''}`} />
                 </div>
             </div>
+
+            {reason && (
+                <div className="delay-reason-box">
+                    <strong>Orsak:</strong> {reason}
+                </div>
+            )}
 
             {connectionRisk && (
                 <div className="connection-warning">

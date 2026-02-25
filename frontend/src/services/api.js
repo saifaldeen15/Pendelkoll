@@ -1,32 +1,21 @@
 import axios from 'axios';
-import { set, formatISO } from 'date-fns';
+import { set, formatISO, startOfDay, endOfDay } from 'date-fns';
 
 const API_KEY = "b6565dadae6b48999f016edb0f5ebff2";
 
 const STATION_NAMES = {
-    "Hie": "Hyllie",
-    "Mc": "Malmö C",
-    "Lu": "Lund C",
-    "Hm": "Hässleholm",
-    "Av": "Alvesta",
-    "Vö": "Växjö",
-    "Lo": "Lessebo",
-    "Em": "Emmaboda",
-    "Nyb": "Nybro",
-    "Kac": "Kalmar C",
-    "Ck": "Karlskrona C",
-    "Rnb": "Ronneby",
-    "Bkb": "Bräkne-Hoby",
-    "Khn": "Karlshamn"
+    "Mc": "Malmö C", "Lu": "Lund C", "Hm": "Hässleholm", "Av": "Alvesta", 
+    "Vö": "Växjö", "Lo": "Lessebo", "Em": "Emmaboda", "Nyb": "Nybro", 
+    "Kac": "Kalmar C", "Ck": "Karlskrona C", "Rnb": "Ronneby"
 };
 
-const RELEVANT_STATIONS = ["Mc", "Lu", "Hm", "Av", "Vö", "Lo", "Em", "Nyb", "Kac", "Ck", "Rnb", "Bkb", "Khn"];
+const RELEVANT_STATIONS = ["Mc", "Lu", "Hm", "Av", "Vö", "Lo", "Em", "Nyb", "Kac", "Ck", "Rnb"];
 
 export const fetchTrainData = async () => {
     const url = "https://api.trafikinfo.trafikverket.se/v2/data.json";
     const now = new Date();
-    const startTime = set(now, { hours: 4, minutes: 0, seconds: 0, milliseconds: 0 });
-    const endTime = set(now, { hours: 23, minutes: 59, seconds: 0, milliseconds: 0 });
+    const startTime = startOfDay(now);
+    const endTime = endOfDay(now);
 
     const xmlQuery = `
     <REQUEST>
@@ -43,9 +32,6 @@ export const fetchTrainData = async () => {
             </FILTER>
              <INCLUDE>AdvertisedTrainIdent</INCLUDE>
              <INCLUDE>LocationSignature</INCLUDE>
-             <INCLUDE>ToLocation</INCLUDE>
-             <INCLUDE>FromLocation</INCLUDE>
-             <INCLUDE>ProductInformation</INCLUDE>
              <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>
              <INCLUDE>TimeAtLocation</INCLUDE>
              <INCLUDE>EstimatedTimeAtLocation</INCLUDE>
@@ -59,129 +45,110 @@ export const fetchTrainData = async () => {
     try {
         const response = await axios.post(url, xmlQuery, { headers: { 'Content-Type': 'text/xml' } });
         const result = response.data?.RESPONSE?.RESULT?.[0]?.TrainAnnouncement || [];
-        return processAllJourneys(result);
+        return processJourneys(result);
     } catch (error) {
         console.error("Error fetching data:", error);
         throw error;
     }
 };
 
-const processAllJourneys = (rawData) => {
+const processJourneys = (rawData) => {
     const trains = {};
     rawData.forEach(entry => {
         const nr = entry.AdvertisedTrainIdent;
-        if (!trains[nr]) {
-            trains[nr] = {
-                train_id: nr,
-                destination: entry.ToLocation?.[0]?.LocationName,
-                stops: {}
-            };
-        }
-        const stationCode = entry.LocationSignature;
-        const stop_data = {
-            station_code: stationCode,
-            station_name: STATION_NAMES[stationCode] || stationCode,
-            advertised_time: entry.AdvertisedTimeAtLocation,
-            actual_time: entry.TimeAtLocation || entry.EstimatedTimeAtLocation,
-            delay: 0,
-            passed: !!entry.TimeAtLocation,
-            canceled: entry.Canceled || false,
-            deviations: entry.Deviation || []
-        };
+        if (!trains[nr]) trains[nr] = { train_id: nr, stops: {} };
         
-        if (stop_data.actual_time) {
-            const adv = new Date(stop_data.advertised_time);
-            const act = new Date(stop_data.actual_time);
-            stop_data.delay = Math.max(0, Math.floor((act - adv) / 60000));
-        }
+        const station = entry.LocationSignature;
+        const adv = entry.AdvertisedTimeAtLocation;
+        const act = entry.TimeAtLocation || entry.EstimatedTimeAtLocation;
+        
+        const delay = act ? Math.max(0, Math.floor((new Date(act) - new Date(adv)) / 60000)) : 0;
+        const reason = entry.Deviation?.map(d => d.Description).join(", ") || "";
 
-        if (!trains[nr].stops[stationCode] || entry.ActivityType === "Avgang") {
-            trains[nr].stops[stationCode] = stop_data;
+        // Spara stoppdata (prioritera Avgång för stationen om det finns flera poster)
+        if (!trains[nr].stops[station] || entry.ActivityType === "Avgang") {
+            trains[nr].stops[station] = {
+                station_code: station,
+                station_name: STATION_NAMES[station] || station,
+                advertised_time: adv,
+                actual_time: act || adv,
+                delay,
+                reason,
+                canceled: entry.Canceled || false,
+                passed: !!entry.TimeAtLocation
+            };
         }
     });
 
     const trainList = Object.values(trains).map(t => ({
         ...t,
-        stops: Object.values(t.stops).sort((a, b) => new Date(a.advertised_time) - new Date(b.advertised_time))
+        stopsList: Object.values(t.stops).sort((a, b) => new Date(a.advertised_time) - new Date(b.advertised_time))
     }));
 
-    const outbound = findConnections(trainList, "Lo", "Em", "Ck"); // Lessebo -> Karlskrona
-    const inbound = findConnections(trainList, "Ck", "Em", "Lo");  // Karlskrona -> Lessebo
-    const fromKalmar = findDirect(trainList, "Kac", "Lo");         // Kalmar -> Lessebo (Direkt)
+    const buildJourney = (from, to, changeStation = null) => {
+        const journeys = [];
+        trainList.forEach(t1 => {
+            const startStop = t1.stops[from];
+            if (!startStop) return;
+
+            if (changeStation) {
+                const changeArr = t1.stops[changeStation];
+                if (!changeArr || new Date(changeArr.advertised_time) <= new Date(startStop.advertised_time)) return;
+
+                const connections = trainList.filter(t2 => {
+                    const cDep = t2.stops[changeStation];
+                    const final = t2.stops[to];
+                    if (!cDep || !final) return false;
+                    const diff = (new Date(cDep.advertised_time) - new Date(changeArr.actual_time)) / 60000;
+                    return diff >= 2 && diff <= 60 && new Date(cDep.advertised_time) < new Date(final.advertised_time);
+                }).sort((a, b) => new Date(a.stops[changeStation].advertised_time) - new Date(b.stops[changeStation].advertised_time));
+
+                if (connections.length > 0) {
+                    const t2 = connections[0];
+                    const finalStop = t2.stops[to];
+                    journeys.push({
+                        id: `${t1.train_id}-${t2.train_id}`,
+                        date: formatISO(new Date(startStop.advertised_time), { representation: 'date' }),
+                        departureTime: startStop.advertised_time,
+                        arrivalTime: finalStop.advertised_time,
+                        fromName: STATION_NAMES[from],
+                        toName: STATION_NAMES[to],
+                        leg1: { ...t1, stops: t1.stopsList },
+                        leg2: { ...t2, stops: t2.stopsList },
+                        connectionRisk: (new Date(t2.stops[changeStation].actual_time) - new Date(changeArr.actual_time)) / 60000 < 5,
+                        reason: startStop.reason || t2.stops[changeStation].reason || ""
+                    });
+                }
+            } else {
+                const endStop = t1.stops[to];
+                if (endStop && new Date(endStop.advertised_time) > new Date(startStop.advertised_time)) {
+                    journeys.push({
+                        id: t1.train_id,
+                        date: formatISO(new Date(startStop.advertised_time), { representation: 'date' }),
+                        departureTime: startStop.advertised_time,
+                        arrivalTime: endStop.advertised_time,
+                        fromName: STATION_NAMES[from],
+                        toName: STATION_NAMES[to],
+                        leg1: { ...t1, stops: t1.stopsList },
+                        leg2: null,
+                        connectionRisk: false,
+                        reason: startStop.reason || ""
+                    });
+                }
+            }
+        });
+        return journeys.sort((a, b) => new Date(a.departureTime) - new Date(b.departureTime));
+    };
+
+    const toKarlskrona = buildJourney("Lo", "Ck", "Em");
+    const back1 = buildJourney("Ck", "Lo", "Em");
+    const back2 = buildJourney("Kac", "Lo");
+
+    const allInbound = [...back1, ...back2].sort((a, b) => new Date(a.departureTime) - new Date(b.departureTime));
 
     return {
-        toKarlskrona: outbound,
-        toLessebo: [...inbound, ...fromKalmar].sort((a, b) => new Date(a.departureTime) - new Date(b.departureTime))
+        toKarlskrona: toKarlskrona.filter(j => new Date(j.arrivalTime) > new Date(Date.now() - 60 * 60000)),
+        toLessebo: allInbound.filter(j => new Date(j.arrivalTime) > new Date(Date.now() - 60 * 60000)),
+        history: [...toKarlskrona, ...allInbound].sort((a, b) => new Date(b.departureTime) - new Date(a.departureTime))
     };
-};
-
-const findDirect = (trains, from, to) => {
-    const journeys = [];
-    trains.forEach(t => {
-        const start = t.stops.find(s => s.station_code === from);
-        const end = t.stops.find(s => s.station_code === to);
-        if (start && end && new Date(start.advertised_time) < new Date(end.advertised_time)) {
-            journeys.push({
-                id: t.train_id,
-                departureTime: start.advertised_time,
-                direction: "inbound",
-                leg1: { ...t, stops: t.stops.filter(s => [from, "Em", to].includes(s.station_code)) },
-                leg2: null,
-                connectionRisk: false
-            });
-        }
-    });
-    return journeys;
-};
-
-const findConnections = (trains, from, change, to) => {
-    const leg1Trains = trains.filter(t => {
-        const s1 = t.stops.find(s => s.station_code === from);
-        const s2 = t.stops.find(s => s.station_code === change);
-        return s1 && s2 && new Date(s1.advertised_time) < new Date(s2.advertised_time);
-    });
-
-    const leg2Trains = trains.filter(t => {
-        const s1 = t.stops.find(s => s.station_code === change);
-        const s2 = t.stops.find(s => s.station_code === to);
-        return s1 && s2 && new Date(s1.advertised_time) < new Date(s2.advertised_time);
-    });
-
-    const journeys = [];
-    leg1Trains.forEach(l1 => {
-        const depFromStart = l1.stops.find(s => s.station_code === from);
-        const arrAtChange = l1.stops.find(s => s.station_code === change);
-        const l1ArrTime = new Date(arrAtChange.actual_time || arrAtChange.advertised_time);
-
-        const connections = leg2Trains.filter(l2 => {
-            const depFromChange = l2.stops.find(s => s.station_code === change);
-            const l2DepTime = new Date(depFromChange.advertised_time);
-            const diff = (l2DepTime - l1ArrTime) / 60000;
-            return diff >= 0 && diff <= 120;
-        }).sort((a, b) => new Date(a.stops.find(s => s.station_code === change).advertised_time) - new Date(b.stops.find(s => s.station_code === change).advertised_time));
-
-        const l2 = connections[0] || null;
-        let connectionRisk = false;
-        let connectionWarning = "";
-
-        if (l2) {
-            const depFromChange = l2.stops.find(s => s.station_code === change);
-            const l2DepTime = new Date(depFromChange.actual_time || depFromChange.advertised_time);
-            const marginal = Math.floor((l2DepTime - l1ArrTime) / 60000);
-            if (marginal < 5) {
-                connectionRisk = true;
-                connectionWarning = `Risk för missat byte i ${STATION_NAMES[change]}! ${marginal} min marginal.`;
-            }
-        }
-
-        journeys.push({
-            id: l1.train_id,
-            departureTime: depFromStart.advertised_time,
-            leg1: l1,
-            leg2: l2,
-            connectionRisk,
-            connectionWarning
-        });
-    });
-    return journeys;
 };
