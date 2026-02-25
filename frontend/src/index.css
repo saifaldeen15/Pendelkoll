@@ -1,0 +1,57 @@
+:root {
+  --primary-color: #005ea8;
+  --secondary-color: #f0f4f8;
+  --text-color: #333;
+  --light-text: #666;
+  --success-color: #28a745;
+  --warning-color: #ffc107;
+  --danger-color: #dc3545;
+  --card-bg: #ffffff;
+  --bg-color: #e9ecef;
+  --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --border-radius: 12px;
+}
+
+body {
+  background-color: var(--bg-color);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--text-color);
+  margin: 0;
+  padding: 0;
+}
+
+.container {
+  max-width: 1000px;
+  margin: 40px auto;
+  padding: 0 20px;
+}
+
+h1 {
+  text-align: center;
+  color: var(--primary-color);
+  font-weight: 800;
+  margin-bottom: 10px;
+  font-size: 2.5rem;
+}
+
+.last-updated {
+  text-align: center;
+  color: var(--light-text);
+  font-size: 0.9rem;
+  margin-bottom: 40px;
+}
+
+.train-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.error-message {
+    text-align: center;
+    color: var(--danger-color);
+    background: #fff;
+    padding: 20px;
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+}
