@@ -8,7 +8,6 @@ const TrainTimeline = ({ journey }) => {
 
     const { leg1, leg2, connectionRisk, connectionWarning } = journey;
     
-    // Determine overall status for leg 1
     const lastStopLeg1 = leg1.stops[leg1.stops.length - 1];
     const delayLeg1 = lastStopLeg1 ? lastStopLeg1.delay : 0;
     const isCanceledLeg1 = leg1.stops.some(s => s.canceled);
@@ -18,8 +17,9 @@ const TrainTimeline = ({ journey }) => {
     else if (connectionRisk || delayLeg1 > 10) statusClass = 'red';
     else if (delayLeg1 > 0) statusClass = 'yellow';
 
-    const depFromLo = leg1.stops.find(s => s.station_code === "Lo");
-    const arrAtCk = leg2 ? leg2.stops.find(s => s.station_code === "Ck") : null;
+    const depFromStart = leg1.stops[0];
+    const finalLeg = leg2 || leg1;
+    const arrAtEnd = finalLeg.stops[finalLeg.stops.length - 1];
 
     return (
         <div className={`journey-card status-${statusClass} ${isOpen ? 'expanded' : ''}`}>
@@ -27,15 +27,15 @@ const TrainTimeline = ({ journey }) => {
                 <div className="journey-main-info">
                     <div className="journey-time-row">
                         <span className="time big">
-                            {depFromLo ? format(parseISO(depFromLo.advertised_time), 'HH:mm') : '--:--'}
+                            {format(parseISO(depFromStart.advertised_time), 'HH:mm')}
                         </span>
                         <ArrowRight size={16} />
                         <span className="time big">
-                            {arrAtCk ? format(parseISO(arrAtCk.advertised_time), 'HH:mm') : '??:??'}
+                            {format(parseISO(arrAtEnd.advertised_time), 'HH:mm')}
                         </span>
                     </div>
                     <div className="journey-route-label">
-                        Lessebo &rarr; Karlskrona
+                        {depFromStart.station_name} &rarr; {arrAtEnd.station_name}
                     </div>
                 </div>
 
@@ -57,7 +57,7 @@ const TrainTimeline = ({ journey }) => {
 
             <div className={`journey-details ${isOpen ? 'open' : ''}`}>
                 <section className="leg-section">
-                    <h4>Etapp 1: Öresundståg {leg1.train_id}</h4>
+                    <h4>Etapp 1: {leg1.train_id}</h4>
                     <div className="timeline-v">
                         {leg1.stops.map((stop, idx) => (
                             <StopRow key={idx} stop={stop} isCurrent={stop.station_code === leg1.current_position} />
@@ -67,15 +67,15 @@ const TrainTimeline = ({ journey }) => {
 
                 {leg2 ? (
                     <section className="leg-section">
-                        <h4>Etapp 2: Krösatåg {leg2.train_id}</h4>
+                        <h4>Etapp 2: {leg2.train_id}</h4>
                         <div className="timeline-v">
                             {leg2.stops.map((stop, idx) => (
                                 <StopRow key={idx} stop={stop} isCurrent={stop.station_code === leg2.current_position} />
                             ))}
                         </div>
                     </section>
-                ) : (
-                    <div className="no-connection">Hittade ingen anslutning i Emmaboda.</div>
+                ) : leg1.stops.length > 2 && (
+                    <div className="direct-info">Direktresa (inget byte)</div>
                 )}
             </div>
         </div>
