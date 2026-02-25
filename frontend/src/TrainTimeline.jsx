@@ -5,37 +5,25 @@ import './TrainTimeline.css';
 
 const TrainTimeline = ({ journey }) => {
     const [isOpen, setIsOpen] = useState(false);
-
-    const { leg1, leg2, connectionRisk, connectionWarning, reason, date } = journey;
+    const { leg1, leg2, connectionRisk, connectionWarning, reason, advDep, advArr, actDep, actArr } = journey;
     
-    const lastStopLeg1 = leg1.stops[leg1.stops.length - 1];
-    const delayLeg1 = lastStopLeg1 ? lastStopLeg1.delay : 0;
-    const isCanceledLeg1 = leg1.stops.some(s => s.canceled);
+    const diff = Math.floor((new Date(actArr) - new Date(advArr)) / 60000);
     
     let statusClass = 'green';
-    if (isCanceledLeg1 || (leg2 && leg2.stops.some(s => s.canceled))) statusClass = 'red';
-    else if (connectionRisk || delayLeg1 > 10) statusClass = 'red';
-    else if (delayLeg1 > 0) statusClass = 'yellow';
-
-    const depFromStart = leg1.stops[0];
-    const finalLeg = leg2 || leg1;
-    const arrAtEnd = finalLeg.stops[finalLeg.stops.length - 1];
+    if (connectionRisk || diff > 15) statusClass = 'red';
+    else if (diff > 0) statusClass = 'yellow';
 
     return (
         <div className={`journey-card status-${statusClass} ${isOpen ? 'expanded' : ''}`}>
             <div className="journey-header" onClick={() => setIsOpen(!isOpen)}>
                 <div className="journey-main-info">
                     <div className="journey-date">
-                        <Calendar size={12} /> {format(parseISO(journey.departureTime), 'dd MMM')}
+                        <Calendar size={12} /> {journey.date}
                     </div>
                     <div className="journey-time-row">
-                        <span className="time big">
-                            {format(parseISO(depFromStart.advertised_time), 'HH:mm')}
-                        </span>
+                        <span className="time big">{format(parseISO(advDep), 'HH:mm')}</span>
                         <ArrowRight size={16} />
-                        <span className="time big">
-                            {format(parseISO(arrAtEnd.advertised_time), 'HH:mm')}
-                        </span>
+                        <span className="time big">{format(parseISO(advArr), 'HH:mm')}</span>
                     </div>
                     <div className="journey-route-label">
                         {journey.fromName} &rarr; {journey.toName}
@@ -45,28 +33,23 @@ const TrainTimeline = ({ journey }) => {
                 <div className="journey-status-area">
                     {connectionRisk && <AlertTriangle className="warning-icon" size={20} />}
                     <div className={`status-badge ${statusClass}`}>
-                        {statusClass === 'green' ? 'I tid' : (isCanceledLeg1 ? 'Inställt' : `+${delayLeg1} min`)}
+                        {diff > 0 ? `+${diff} min` : 'I tid'}
                     </div>
                     <ChevronDown size={20} className={`chevron ${isOpen ? 'rotated' : ''}`} />
                 </div>
             </div>
 
-            {reason && (
-                <div className="delay-reason-box">
-                    <strong>Orsak:</strong> {reason}
-                </div>
-            )}
+            {reason && <div className="delay-reason-box"><strong>Orsak:</strong> {reason}</div>}
 
             {connectionRisk && (
                 <div className="connection-warning">
-                    <AlertTriangle size={16} />
-                    {connectionWarning}
+                    <AlertTriangle size={16} /> {connectionWarning}
                 </div>
             )}
 
             <div className={`journey-details ${isOpen ? 'open' : ''}`}>
                 <section className="leg-section">
-                    <h4>Etapp 1: {leg1.train_id}</h4>
+                    <h4>{journey.leg1.train_id} ({journey.fromName} start)</h4>
                     <div className="timeline-v">
                         {leg1.stops.map((stop, idx) => (
                             <StopRow key={idx} stop={stop} isCurrent={stop.station_code === leg1.current_position} />
@@ -76,14 +59,14 @@ const TrainTimeline = ({ journey }) => {
 
                 {leg2 ? (
                     <section className="leg-section">
-                        <h4>Etapp 2: {leg2.train_id}</h4>
+                        <h4>{leg2.train_id} (Anslutning)</h4>
                         <div className="timeline-v">
                             {leg2.stops.map((stop, idx) => (
                                 <StopRow key={idx} stop={stop} isCurrent={stop.station_code === leg2.current_position} />
                             ))}
                         </div>
                     </section>
-                ) : leg1.stops.length > 2 && (
+                ) : (
                     <div className="direct-info">Direktresa (inget byte)</div>
                 )}
             </div>
@@ -93,7 +76,6 @@ const TrainTimeline = ({ journey }) => {
 
 const StopRow = ({ stop, isCurrent }) => {
     const isDelayed = stop.delay > 0;
-    
     return (
         <div className={`stop-row ${stop.passed ? 'passed' : ''} ${isCurrent ? 'current' : ''} ${stop.canceled ? 'canceled' : ''}`}>
             <div className="stop-marker">
@@ -105,7 +87,7 @@ const StopRow = ({ stop, isCurrent }) => {
                 <div className="stop-times">
                     {isDelayed && <span className="old-time">{format(parseISO(stop.advertised_time), 'HH:mm')}</span>}
                     <span className={`time ${isDelayed ? 'delayed' : ''}`}>
-                        {format(parseISO(stop.actual_time || stop.advertised_time), 'HH:mm')}
+                        {format(parseISO(stop.actual_time), 'HH:mm')}
                     </span>
                 </div>
             </div>

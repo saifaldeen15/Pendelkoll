@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { format, parseISO } from 'date-fns';
 import { fetchTrainData } from './services/api';
 import TrainTimeline from './TrainTimeline';
@@ -12,7 +12,6 @@ function App() {
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [activeTab, setActiveTab] = useState('outbound'); 
-  const notifiedIds = useRef(new Set());
 
   const fetchTrains = useCallback(async () => {
     try {
@@ -21,7 +20,6 @@ function App() {
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
-      console.error("Error fetching train data:", err);
       setError("Misslyckades att hämta tågdata.");
     } finally {
       setLoading(false);
@@ -41,29 +39,36 @@ function App() {
           <thead>
             <tr>
               <th>Datum</th>
-              <th>Rutt</th>
-              <th>Tabelltid</th>
-              <th>Verklig tid</th>
-              <th>Diff</th>
-              <th>Anledning</th>
+              <th>Från hållplats</th>
+              <th>Till hållplats</th>
+              <th>Avgång (Tabell)</th>
+              <th>Ankomst (Tabell)</th>
+              <th>Linje</th>
+              <th>Byte vid</th>
+              <th>Avgång (Verklig)</th>
+              <th>Ankomst (Verklig)</th>
+              <th>Vad gick fel?</th>
             </tr>
           </thead>
           <tbody>
             {data.history.map((j) => {
-              const depTime = parseISO(j.departureTime);
-              const leg1LastStop = j.leg1.stops[j.leg1.stops.length - 1];
-              const totalDelay = leg1LastStop.delay;
-              
+              const diff = Math.floor((new Date(j.actArr) - new Date(j.advArr)) / 60000);
               return (
-                <tr key={j.id} className={totalDelay > 5 ? 'row-delayed' : ''}>
-                  <td>{format(depTime, 'dd MMM')}</td>
-                  <td>{j.fromName} → {j.toName}</td>
-                  <td>{format(depTime, 'HH:mm')}</td>
-                  <td className={totalDelay > 0 ? 'late' : ''}>
-                    {format(parseISO(j.leg1.stops[0].actual_time), 'HH:mm')}
+                <tr key={j.id} className={diff > 15 ? 'row-delayed-critical' : diff > 0 ? 'row-delayed' : ''}>
+                  <td>{j.date}</td>
+                  <td>{j.fromName}</td>
+                  <td>{j.toName}</td>
+                  <td>{format(parseISO(j.advDep), 'HH:mm')}</td>
+                  <td>{format(parseISO(j.advArr), 'HH:mm')}</td>
+                  <td>{j.line}</td>
+                  <td>{j.changeAt}</td>
+                  <td className={new Date(j.actDep) > new Date(j.advDep) ? 'late' : ''}>
+                    {format(parseISO(j.actDep), 'HH:mm')}
                   </td>
-                  <td>{totalDelay > 0 ? `+${totalDelay} min` : 'I tid'}</td>
-                  <td className="reason-cell" title={j.reason}>{j.reason || '-'}</td>
+                  <td className={new Date(j.actArr) > new Date(j.advArr) ? 'late' : ''}>
+                    {format(parseISO(j.actArr), 'HH:mm')}
+                  </td>
+                  <td className="reason-cell">{j.reason || (diff > 0 ? `Försenat ${diff} min` : '-')}</td>
                 </tr>
               );
             })}

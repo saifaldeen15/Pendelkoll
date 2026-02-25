@@ -57,26 +57,21 @@ const processJourneys = (rawData) => {
     rawData.forEach(entry => {
         const nr = entry.AdvertisedTrainIdent;
         if (!trains[nr]) trains[nr] = { train_id: nr, stops: {} };
-        
         const station = entry.LocationSignature;
-        const adv = entry.AdvertisedTimeAtLocation;
-        const act = entry.TimeAtLocation || entry.EstimatedTimeAtLocation;
-        
-        const delay = act ? Math.max(0, Math.floor((new Date(act) - new Date(adv)) / 60000)) : 0;
-        const reason = entry.Deviation?.map(d => d.Description).join(", ") || "";
-
-        // Spara stoppdata (prioritera Avgång för stationen om det finns flera poster)
         if (!trains[nr].stops[station] || entry.ActivityType === "Avgang") {
             trains[nr].stops[station] = {
                 station_code: station,
                 station_name: STATION_NAMES[station] || station,
-                advertised_time: adv,
-                actual_time: act || adv,
-                delay,
-                reason,
+                advertised_time: entry.AdvertisedTimeAtLocation,
+                actual_time: entry.TimeAtLocation || entry.EstimatedTimeAtLocation || entry.AdvertisedTimeAtLocation,
+                delay: 0,
+                reason: entry.Deviation?.map(d => d.Description).join(", ") || "",
                 canceled: entry.Canceled || false,
                 passed: !!entry.TimeAtLocation
             };
+            const adv = new Date(trains[nr].stops[station].advertised_time);
+            const act = new Date(trains[nr].stops[station].actual_time);
+            trains[nr].stops[station].delay = Math.max(0, Math.floor((act - adv) / 60000));
         }
     });
 
@@ -106,17 +101,24 @@ const processJourneys = (rawData) => {
                 if (connections.length > 0) {
                     const t2 = connections[0];
                     const finalStop = t2.stops[to];
+                    const changeDep = t2.stops[changeStation];
                     journeys.push({
                         id: `${t1.train_id}-${t2.train_id}`,
                         date: formatISO(new Date(startStop.advertised_time), { representation: 'date' }),
-                        departureTime: startStop.advertised_time,
-                        arrivalTime: finalStop.advertised_time,
                         fromName: STATION_NAMES[from],
                         toName: STATION_NAMES[to],
+                        line: `Tåg ${t1.train_id} / ${t2.train_id}`,
+                        changeAt: STATION_NAMES[changeStation],
+                        // Din tidtabell
+                        advDep: startStop.advertised_time,
+                        advArr: finalStop.advertised_time,
+                        // Verklig tid
+                        actDep: startStop.actual_time,
+                        actArr: finalStop.actual_time,
                         leg1: { ...t1, stops: t1.stopsList },
                         leg2: { ...t2, stops: t2.stopsList },
-                        connectionRisk: (new Date(t2.stops[changeStation].actual_time) - new Date(changeArr.actual_time)) / 60000 < 5,
-                        reason: startStop.reason || t2.stops[changeStation].reason || ""
+                        connectionRisk: (new Date(changeDep.actual_time) - new Date(changeArr.actual_time)) / 60000 < 5,
+                        reason: startStop.reason || t2.stops[to].reason || ""
                     });
                 }
             } else {
@@ -125,30 +127,34 @@ const processJourneys = (rawData) => {
                     journeys.push({
                         id: t1.train_id,
                         date: formatISO(new Date(startStop.advertised_time), { representation: 'date' }),
-                        departureTime: startStop.advertised_time,
-                        arrivalTime: endStop.advertised_time,
                         fromName: STATION_NAMES[from],
                         toName: STATION_NAMES[to],
+                        line: `Tåg ${t1.train_id}`,
+                        changeAt: "Direkt",
+                        advDep: startStop.advertised_time,
+                        advArr: endStop.advertised_time,
+                        actDep: startStop.actual_time,
+                        actArr: endStop.actual_time,
                         leg1: { ...t1, stops: t1.stopsList },
                         leg2: null,
                         connectionRisk: false,
-                        reason: startStop.reason || ""
+                        reason: startStop.reason || endStop.reason || ""
                     });
                 }
             }
         });
-        return journeys.sort((a, b) => new Date(a.departureTime) - new Date(b.departureTime));
+        return journeys.sort((a, b) => new Date(a.advDep) - new Date(b.advDep));
     };
 
     const toKarlskrona = buildJourney("Lo", "Ck", "Em");
     const back1 = buildJourney("Ck", "Lo", "Em");
     const back2 = buildJourney("Kac", "Lo");
 
-    const allInbound = [...back1, ...back2].sort((a, b) => new Date(a.departureTime) - new Date(b.departureTime));
+    const allInbound = [...back1, ...back2].sort((a, b) => new Date(a.advDep) - new Date(b.advDep));
 
     return {
-        toKarlskrona: toKarlskrona.filter(j => new Date(j.arrivalTime) > new Date(Date.now() - 60 * 60000)),
-        toLessebo: allInbound.filter(j => new Date(j.arrivalTime) > new Date(Date.now() - 60 * 60000)),
-        history: [...toKarlskrona, ...allInbound].sort((a, b) => new Date(b.departureTime) - new Date(a.departureTime))
+        toKarlskrona: toKarlskrona.filter(j => new Date(j.advArr) > new Date(Date.now() - 60 * 60000)),
+        toLessebo: allInbound.filter(j => new Date(j.advArr) > new Date(Date.now() - 60 * 60000)),
+        history: [...toKarlskrona, ...allInbound].sort((a, b) => new Date(b.advDep) - new Date(a.advDep))
     };
 };
